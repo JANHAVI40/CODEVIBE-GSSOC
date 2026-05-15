@@ -1,5 +1,5 @@
 // src/components/Compiler.jsx
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import axios from "axios";
 
 const SCORING = (attempt) =>
@@ -16,7 +16,9 @@ const normalizeHTML = (s = "") => String(s).trim().replace(/\s+/g, " ");
 
 const Compiler = ({ LessonId, language: fixedLanguage, initialCode = "", expectedOutput, onSuccess }) => {
   const [language, setLanguage] = useState(fixedLanguage || "html");
-  const [code, setCode] = useState(initialCode);
+  const [code, setCode] = useState(
+  localStorage.getItem("savedCode") || initialCode
+);
   const [tries, setTries] = useState(0);
   const [score, setScore] = useState(null);
   const [error, setError] = useState("");
@@ -50,6 +52,36 @@ const Compiler = ({ LessonId, language: fixedLanguage, initialCode = "", expecte
     setError(msg);
     setStatus("❌ Try again!");
   };
+
+  const saveCode = () => {
+  localStorage.setItem("savedCode", code);
+  setStatus("💾 Code Saved!");
+};
+
+const clearOutput = () => {
+  setStatus("");
+  setError("");
+  setScore(null);
+};
+
+//Toggle comment
+const toggleComment = () => {
+
+  const lines = code.split("\n");
+
+  const updatedLines = lines.map((line) => {
+
+    const trimmed = line.trim();
+
+    if (trimmed.startsWith("//")) {
+      return line.replace(/^(\s*)\/\/\s?/, "$1");
+    }
+
+    return "// " + line;
+  });
+
+  setCode(updatedLines.join("\n"));
+};
 
   // ------------------- client-side runners -------------------
 
@@ -210,6 +242,44 @@ const Compiler = ({ LessonId, language: fixedLanguage, initialCode = "", expecte
     fail("Unsupported language in this setup.");
   };
 
+  useEffect(() => {
+
+  const handleKeyDown = (e) => {
+
+    // CTRL + ENTER => RUN CODE
+    if (e.ctrlKey && e.key === "Enter") {
+      e.preventDefault();
+      runCode();
+    }
+
+    // CTRL + S => SAVE CODE
+    if (e.ctrlKey && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      saveCode();
+    }
+
+    // ESC => CLEAR OUTPUT
+    if (e.key === "Escape") {
+      clearOutput();
+    }
+
+    // CTRL + / => TOGGLE COMMENT
+    if (e.ctrlKey && e.key === "/") {
+      e.preventDefault();
+      toggleComment();
+    }
+  };
+
+  // START LISTENING
+  window.addEventListener("keydown", handleKeyDown);
+
+  // CLEANUP
+  return () => {
+    window.removeEventListener("keydown", handleKeyDown);
+  };
+
+}, [code]);
+
   return (
     <div className="compiler" style={{ color: "#fff", background: "#111", padding: 16, borderRadius: 12 }}>
       {!fixedLanguage && (
@@ -236,7 +306,7 @@ const Compiler = ({ LessonId, language: fixedLanguage, initialCode = "", expecte
       />
 
       <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-        <button onClick={runCode} style={{ padding: "8px 14px", background: "#2563eb", color: "#fff", borderRadius: 10 }}>Run</button>
+        <button title="Ctrl + Enter" onClick={runCode} style={{ padding: "8px 14px", background: "#2563eb", color: "#fff", borderRadius: 10 }}>Run</button>
         <button onClick={() => { setCode(initialCode); setStatus(""); setError(""); setScore(null); }} style={{ padding: "8px 14px", background: "#374151", color: "#fff", borderRadius: 10 }}>Reset</button>
       </div>
 

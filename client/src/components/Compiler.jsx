@@ -16,17 +16,54 @@ const normalizeHTML = (s = "") => String(s).trim().replace(/\s+/g, " ");
 
 const Compiler = ({ LessonId, language: fixedLanguage, initialCode = "", expectedOutput, onSuccess }) => {
   const [language, setLanguage] = useState(fixedLanguage || "html");
-  const [code, setCode] = useState(
-  localStorage.getItem("savedCode") || initialCode
-);
+  const [code, setCode] = useState(initialCode);
   const [tries, setTries] = useState(0);
   const [score, setScore] = useState(null);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const iframeRef = useRef(null);
+  const copyCode = async () => {
+  try {
+    await navigator.clipboard.writeText(code);
+    setStatus("📋 Code copied!");
+  } catch {
+    setError("Failed to copy code");
+  }
+};
+
+const downloadCode = () => {
+  const extensions = {
+    html: "html",
+    css: "css",
+    js: "js",
+    react: "jsx",
+    python: "py",
+    java: "java",
+    c: "c",
+    cpp: "cpp"
+  };
+
+  const ext = extensions[language] || "txt";
+
+  const blob = new Blob([code], { type: "text/plain" });
+  const link = document.createElement("a");
+
+  link.href = URL.createObjectURL(blob);
+  link.download = `codevibe-code.${ext}`;
+  link.click();
+
+  URL.revokeObjectURL(link.href);
+
+  setStatus("⬇️ Code downloaded!");
+};
 
   const saveProgress = (lessonId, sc, attempt) => {
     const email = localStorage.getItem("userEmail");
+    window.dispatchEvent(
+      new CustomEvent("codevibe-progress-updated", {
+        detail: { lessonId, score: sc },
+      })
+    );
     axios.post(`http://localhost:5002/api/lesson/${lessonId}/complete`, { email, score: sc })
       .catch(err => console.error("Save progress error:", err));
     onSuccess?.({ LessonId: lessonId, score: sc, tries: attempt });
@@ -52,36 +89,6 @@ const Compiler = ({ LessonId, language: fixedLanguage, initialCode = "", expecte
     setError(msg);
     setStatus("❌ Try again!");
   };
-
-  const saveCode = () => {
-  localStorage.setItem("savedCode", code);
-  setStatus("💾 Code Saved!");
-};
-
-const clearOutput = () => {
-  setStatus("");
-  setError("");
-  setScore(null);
-};
-
-//Toggle comment
-const toggleComment = () => {
-
-  const lines = code.split("\n");
-
-  const updatedLines = lines.map((line) => {
-
-    const trimmed = line.trim();
-
-    if (trimmed.startsWith("//")) {
-      return line.replace(/^(\s*)\/\/\s?/, "$1");
-    }
-
-    return "// " + line;
-  });
-
-  setCode(updatedLines.join("\n"));
-};
 
   // ------------------- client-side runners -------------------
 
@@ -223,11 +230,40 @@ const toggleComment = () => {
   };
 
   // ------------------- orchestrator -------------------
+  useEffect(() => {
+  const handleKeyDown = (e) => {
+    if (e.ctrlKey && e.key === "Enter") {
+      e.preventDefault();
+      runCode();
+    }
 
+    if (e.ctrlKey && e.key.toLowerCase() === "r") {
+      e.preventDefault();
+
+      setCode(initialCode);
+      setStatus("");
+      setError("");
+      setScore(null);
+    }
+  };
+
+  window.addEventListener("keydown", handleKeyDown);
+
+  return () => {
+    window.removeEventListener("keydown", handleKeyDown);
+  };
+}, [code, initialCode, language, tries]);
   const runCode = async () => {
-    const attempt = tries + 1;
-    setTries(attempt);
-    setError(""); setScore(null); setStatus("⏳ Running...");
+    const isFirstPass = score === null;
+    const attempt = isFirstPass ? tries + 1 : tries;
+
+    if (isFirstPass) {
+      setTries(attempt);
+      setScore(null);
+    }
+
+    setError("");
+    setStatus("⏳ Running...");
     const iframe = iframeRef.current;
     const iframeDoc = iframe?.contentDocument || iframe?.contentWindow?.document;
     const iframeWin = iframe?.contentWindow;
@@ -241,44 +277,6 @@ const toggleComment = () => {
     if (language === "react") return runReact(attempt, iframeDoc);
     fail("Unsupported language in this setup.");
   };
-
-  useEffect(() => {
-
-  const handleKeyDown = (e) => {
-
-    // CTRL + ENTER => RUN CODE
-    if (e.ctrlKey && e.key === "Enter") {
-      e.preventDefault();
-      runCode();
-    }
-
-    // CTRL + S => SAVE CODE
-    if (e.ctrlKey && e.key.toLowerCase() === "s") {
-      e.preventDefault();
-      saveCode();
-    }
-
-    // ESC => CLEAR OUTPUT
-    if (e.key === "Escape") {
-      clearOutput();
-    }
-
-    // CTRL + / => TOGGLE COMMENT
-    if (e.ctrlKey && e.key === "/") {
-      e.preventDefault();
-      toggleComment();
-    }
-  };
-
-  // START LISTENING
-  window.addEventListener("keydown", handleKeyDown);
-
-  // CLEANUP
-  return () => {
-    window.removeEventListener("keydown", handleKeyDown);
-  };
-
-}, [code]);
 
   return (
     <div className="compiler" style={{ color: "#fff", background: "#111", padding: 16, borderRadius: 12 }}>
@@ -300,15 +298,100 @@ const toggleComment = () => {
         </select>
       )}
 
-      <textarea value={code} onChange={e => setCode(e.target.value)}
-        style={{ width: "100%", height: 180, background: "#1b1b1b", color: "#9efc9e", padding: 12, borderRadius: 8 }}
-        placeholder={`// Type your code here. Use console.log for JS outputs.\n// For React define function App(){ return <h1>Hello</h1> }\n// Server languages will be executed by backend: POST /api/execute/:language`}
-      />
+      <div style={{ position: "relative", marginTop: 12 }}>
 
-      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-        <button title="Ctrl + Enter" onClick={runCode} style={{ padding: "8px 14px", background: "#2563eb", color: "#fff", borderRadius: 10 }}>Run</button>
-        <button onClick={() => { setCode(initialCode); setStatus(""); setError(""); setScore(null); }} style={{ padding: "8px 14px", background: "#374151", color: "#fff", borderRadius: 10 }}>Reset</button>
-      </div>
+  <div
+    style={{
+      position: "absolute",
+      top: 10,
+      right: 10,
+      display: "flex",
+      gap: 8,
+      zIndex: 10
+    }}
+  >
+    <button
+      title="Copy Code"
+      onClick={copyCode}
+      style={{
+        background: "#059669",
+        color: "white",
+        border: "none",
+        borderRadius: 15,
+        padding: "6px 10px",
+        cursor: "pointer",
+        fontSize: 12
+      }}
+    >
+      📋 Copy
+    </button>
+
+    <button
+      title="Download Code"
+      onClick={downloadCode}
+      style={{
+        background: "#7c3aed",
+        color: "white",
+        border: "none",
+        borderRadius: 15,
+        padding: "6px 10px",
+        cursor: "pointer",
+        fontSize: 12
+      }}
+    >
+      Download
+    </button>
+  </div>
+
+  <textarea
+    value={code}
+    onChange={e => setCode(e.target.value)}
+    style={{
+      width: "100%",
+      height: 180,
+      background: "#1b1b1b",
+      color: "#9efc9e",
+      padding: 12,
+      borderRadius: 8
+    }}
+    placeholder={`// Type your code here. Use console.log for JS outputs.\n// For React define function App(){ return <h1>Hello</h1> }\n// Server languages will be executed by backend: POST /api/execute/:language`}
+  />
+</div>
+
+<div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+
+  <button
+    title="Run (Ctrl + Enter)"
+    onClick={runCode}
+    style={{
+      padding: "8px 14px",
+      background: "#2563eb",
+      color: "#fff",
+      borderRadius: 10
+    }}
+  >
+    Run
+  </button>
+
+  <button
+    title="Reset (Ctrl + R)"
+    onClick={() => {
+      setCode(initialCode);
+      setStatus("");
+      setError("");
+      setScore(null);
+    }}
+    style={{
+      padding: "8px 14px",
+      background: "#374151",
+      color: "#fff",
+      borderRadius: 10
+    }}
+  >
+    Reset
+  </button>
+
+</div>
 
       <iframe ref={iframeRef} style={{ width: "100%", height: 220, background: "#fff", marginTop: 12, borderRadius: 8 }}
         title="code-output" sandbox="allow-scripts allow-same-origin"
